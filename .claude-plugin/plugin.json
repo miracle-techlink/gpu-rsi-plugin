@@ -1,0 +1,10 @@
+{
+  "name": "gpu-rsi-plugin",
+  "description": "GPU 新机 bringup 的自我进化系统:rsiloop 引导目标 → agent 自主迭代优化下载/编译/环境搭建速度,前置一次问答,之后零人工介入",
+  "version": "0.1.0",
+  "author": {
+    "name": "miracle-techlink"
+  },
+  "commands": "./commands",
+  "skills": "./skills"
+}
