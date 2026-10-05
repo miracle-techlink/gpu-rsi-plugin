@@ -55,7 +55,26 @@ sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.ta
 ```bash
 sudo apt update && sudo apt install -y locales
 sudo locale-gen en_US.UTF-8 && sudo update-locale
-# /etc/default/locale 全部 LC_*=en_US.UTF-8
+sudo bash -c 'cat > /etc/default/locale <<EOF
+LANG=en_US.UTF-8
+LANGUAGE=en_US.UTF-8
+LC_CTYPE=en_US.UTF-8
+LC_NUMERIC=en_US.UTF-8
+LC_TIME=en_US.UTF-8
+LC_COLLATE=en_US.UTF-8
+LC_MONETARY=en_US.UTF-8
+LC_MESSAGES=en_US.UTF-8
+LC_PAPER=en_US.UTF-8
+LC_NAME=en_US.UTF-8
+LC_ADDRESS=en_US.UTF-8
+LC_TELEPHONE=en_US.UTF-8
+LC_MEASUREMENT=en_US.UTF-8
+LC_IDENTIFICATION=en_US.UTF-8
+LC_ALL=en_US.UTF-8
+EOF'
+source /etc/default/locale
+sudo apt install -y --reinstall ubuntu-advantage-tools
+locale   # 验证
 ```
 
 1.4 远程 SSH
@@ -85,32 +104,77 @@ sudo ./NVIDIA-Linux-x86_64-570.133.07.run
 sudo update-initramfs -u && sudo reboot
 ```
 
-2.2 基础开发环境(一长串 apt 包)
+2.2 基础开发环境(完整 apt 包列表)
 
 ```bash
-sudo apt install -y wget curl git tmux zsh htop cloc pip git-lfs cmake ninja-build \
-  libjemalloc-dev rdma-core libblas-dev liblapack-dev libatlas-base-dev \
-  libopenblas-base libopenblas-dev openmpi-bin libopenmpi-dev \
-  python3-dev python3-numpy libopencv-dev python3-opencv ffmpeg \
-  lmdb-utils liblmdb-dev python3-lmdb libgflags-dev libgoogle-glog-dev \
-  redis redis-server ccache libboost-all-dev texlive-full
+sudo apt install -y wget curl git tmux zsh htop cloc pip
+sudo apt install -y git-lfs
+sudo apt install -y cmake ninja-build
+sudo apt install -y libjemalloc-dev
+sudo apt install -y rdma-core
+sudo apt install -y intel-mkl              # 交互提示处选 NO
+sudo apt install -y libmkldnn1 libmkldnn-dev libmkldnn-doc
+sudo apt install -y libdnnl2 libdnnl-dev   # oneDNN
+sudo apt install -y libblas-dev liblapack-dev libatlas-base-dev
+sudo apt install -y libopenblas-base libopenblas-dev
+sudo apt install -y openmpi-bin openmpi-doc libopenmpi-dev
+sudo apt install -y opencl-headers opencl-dev ocl-icd-opencl-dev
+sudo apt install -y python3-dev python3-numpy
+sudo apt remove --purge libtbb2-dev -y     # 解决 libtbb 冲突,见下
+sudo apt install -y libopencv-dev python3-opencv
+sudo apt install -y ffmpeg
+sudo apt install -y lmdb-utils liblmdb-dev python3-lmdb
+sudo apt install -y libgflags-dev libgoogle-glog-dev
+sudo apt install -y redis redis-server
+sudo apt install -y ccache
+sudo apt install -y libboost-all-dev
 sudo snap install sccache --candidate --classic
+sudo apt autoremove -y && sudo apt autoclean -y
+sudo apt install -y texlive-full
+# Google Cloud CLI(可选)
+echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
+sudo apt update && sudo apt install -y google-cloud-cli
 ```
 
 踩坑:
-- **包冲突**:libopencv-dev 依赖 libtbb-dev,intel-mkl 依赖 libtbb2-dev,冲突 → `sudo apt remove --purge libtbb2-dev`
-- texlive-full 挂起 bug:连按 10 次回车等待;可先 export LC_ALL=en_US.UTF-8 + sudo apt --fix-broken install
+- **包冲突**:libopencv-dev 依赖 libtbb-dev,intel-mkl 依赖 libtbb2-dev,二者冲突 → 先 `sudo apt remove --purge libtbb2-dev` 再装 opencv
+- texlive-full 挂起(Pregenerating ConTeXt MarkIV format):连按 10 次回车等待;可先 export LC_ALL=en_US.UTF-8 + sudo apt --fix-broken install
 
 2.3 Docker + NVIDIA Container Toolkit
 
 ```bash
-# docker-ce 走清华源安装后,配 registry mirror /etc/docker/daemon.json
+# 移除旧版
+sudo apt remove -y docker docker.io containerd runc
+sudo rm -f /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+
+# docker-ce 清华源
+curl -fsSL https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu/gpg | \
+  sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] \
+  https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu jammy stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# registry mirror → /etc/docker/daemon.json(见云端手册 5.7 可用源现状)
 sudo systemctl daemon-reload && sudo systemctl restart docker
+
 # NVIDIA Container Toolkit
-sudo apt install -y nvidia-docker2
+distribution=$(. /etc/os-release; echo $ID$VERSION_ID)
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | \
+  sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | \
+  sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#' | \
+  sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+sudo apt update && sudo apt install -y nvidia-docker2
 sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
+
+# 免 sudo 跑 docker
 sudo usermod -aG docker $USER
+
+# 验证
+docker run hello-world
 ```
 
 **NVML 坑**:容器内 Failed to initialize NVML: Insufficient Permissions → VirtualGL/NVML 冲突:
@@ -131,24 +195,55 @@ sudo dpkg -i turbovnc_3.2_amd64.deb
 2.5 CUDA Toolkit(多版本共存)
 
 ```bash
-# .run silent 模式只装 toolkit 不装驱动,覆盖 11.7.1~12.9.1
+# .run silent 模式只装 toolkit 不装驱动;按需选版本(11.7.1~12.9.1)
+sudo sh cuda_12.9.1_575.57.08_linux.run --silent --toolkit
+sudo sh cuda_12.8.1_570.124.06_linux.run --silent --toolkit
 sudo sh cuda_12.6.3_560.35.05_linux.run --silent --toolkit
-# 重链软链 + bashrc
-sudo rm /usr/local/cuda && sudo ln -s /usr/local/cuda-11.7 /usr/local/cuda
-# ~/.bashrc: export CUDA_HOME=/usr/local/cuda-11.7; PATH/LD_LIBRARY_PATH 指向 $CUDA_HOME
+sudo sh cuda_12.4.1_550.54.15_linux.run --silent --toolkit
+sudo sh cuda_12.1.1_530.30.02_linux.run --silent --toolkit
+sudo sh cuda_11.8.0_520.61.05_linux.run --silent --toolkit
+sudo sh cuda_11.7.1_515.65.01_linux.run --silent --toolkit
+
+# 重链软链(切到要用的版本)
+sudo rm /usr/local/cuda
+sudo ln -s /usr/local/cuda-11.7 /usr/local/cuda
+
+# ~/.bashrc 追加
+export CUDA_HOME=/usr/local/cuda-11.7
+export PATH=$CUDA_HOME/bin:$PATH
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+source ~/.bashrc
 ```
 
 ---
 
 3. 可选配置(SSH)
 
-3.1 cuDNN(一套 9.x 拷进多个 CUDA 版本目录)
+3.1 cuDNN(一套 9.x 解压两份,逐版本拷进各 CUDA 目录)
 
 ```bash
+# 下载: https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-x86_64/
+sudo tar -xvf cudnn-linux-x86_64-9.10.1.4_cuda11-archive.tar.xz -C /usr/local
 sudo tar -xvf cudnn-linux-x86_64-9.10.1.4_cuda12-archive.tar.xz -C /usr/local
-sudo rm -f /usr/local/cuda-*/include/cudnn.h /usr/local/cuda-*/lib64/libcudnn*
-# 逐版本拷贝 include/cudnn*.h 和 lib/libcudnn* 到各 cuda-X.Y 目录
-# 验证: cat /usr/local/cuda-X.Y/include/cudnn_version.h | grep CUDNN_MAJOR -A 2
+
+# 清掉旧 cudnn
+sudo rm -f /usr/local/cuda-*/include/cudnn.h
+sudo rm -f /usr/local/cuda-*/lib64/libcudnn*
+
+# 逐版本拷贝(每个已装 CUDA 重复;cuda11-archive 拷 11.x,cuda12-archive 拷 12.x)
+for v in 11.7 11.8; do
+  sudo cp -P /usr/local/cudnn-linux-x86_64-9.10.1.4_cuda11-archive/include/cudnn*.h /usr/local/cuda-$v/include/
+  sudo cp -P /usr/local/cudnn-linux-x86_64-9.10.1.4_cuda11-archive/lib/libcudnn*     /usr/local/cuda-$v/lib64/
+done
+for v in 12.0 12.1 12.2 12.3 12.4 12.5 12.6 12.8 12.9; do
+  sudo cp -P /usr/local/cudnn-linux-x86_64-9.10.1.4_cuda12-archive/include/cudnn*.h /usr/local/cuda-$v/include/
+  sudo cp -P /usr/local/cudnn-linux-x86_64-9.10.1.4_cuda12-archive/lib/libcudnn*     /usr/local/cuda-$v/lib64/
+done
+
+# 逐版本验证
+for v in 11.7 11.8 12.1 12.4 12.6 12.9; do
+  echo "== cuda-$v =="; cat /usr/local/cuda-$v/include/cudnn_version.h | grep CUDNN_MAJOR -A 2
+done
 ```
 
 3.2 gcc/g++ 多版本(update-alternatives)
@@ -164,31 +259,79 @@ sudo update-alternatives --config gcc
 3.3 Colmap(源码编译,RTX 5080 用 sm_80)
 
 ```bash
-sudo apt-get install -y git cmake ninja-build build-essential libboost-program-options-dev \
-  libeigen3-dev libflann-dev libfreeimage-dev libmetis-dev libgoogle-glog-dev libgtest-dev \
-  libsqlite3-dev libglew-dev qtbase5-dev libqt5opengl5-dev libcgal-dev libceres-dev
+# 完整依赖
+sudo apt-get install -y git cmake ninja-build build-essential \
+  libboost-program-options-dev libboost-graph-dev libboost-system-dev \
+  libeigen3-dev libflann-dev libfreeimage-dev libmetis-dev \
+  libgoogle-glog-dev libgtest-dev libgmock-dev libsqlite3-dev \
+  libglew-dev qtbase5-dev libqt5opengl5-dev libcgal-dev libceres-dev
+
 git clone https://github.com/colmap/colmap.git && cd colmap
-mkdir build && cd build && cmake .. -GNinja -DCMAKE_CUDA_ARCHITECTURES=80 && ninja && sudo ninja install
+mkdir build && cd build
+cmake .. -GNinja -DCMAKE_CUDA_ARCHITECTURES=80   # RTX 5080 对应 sm_80
+ninja && sudo ninja install
 ```
 
 3.4 ROS2 Humble
 
 ```bash
+# Set locale
+sudo apt update && sudo apt install -y locales
+sudo locale-gen en_US en_US.UTF-8
+sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+export LANG=en_US.UTF-8
+locale   # verify
+
+# Setup sources
+sudo apt install -y software-properties-common
+sudo add-apt-repository universe
+sudo apt update && sudo apt install -y curl
+sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+  -o /usr/share/keyrings/ros-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
+  http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | \
+  sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
 # 关键:装前先解锁被 hold 的显卡驱动
 GPU_DRIVER_VERSION=$(dpkg -l | grep nvidia-driver | awk '{print $3}' | cut -d. -f1)
 sudo apt-mark unhold nvidia-driver-${GPU_DRIVER_VERSION}
-# 官方源装 ros-humble-desktop + ros-dev-tools
+apt-mark showhold
+
+# Install
+sudo apt update && sudo apt upgrade -y
 sudo apt install -y ros-humble-desktop ros-dev-tools
-# 装完重启后再锁回
+
+# 测试
+exec bash
+source /opt/ros/humble/setup.bash
+ros2 run demo_nodes_cpp talker   # 另开终端 ros2 run demo_nodes_py listener
+
+# 装完重启后再锁回驱动
+sudo reboot
+GPU_DRIVER_VERSION=$(dpkg -l | grep nvidia-driver | awk '{print $3}' | cut -d. -f1)
 sudo apt-mark hold nvidia-driver-${GPU_DRIVER_VERSION}
-# 卡在 update-initramfs 时连按回车
+
+# 卸载(如需要)
+sudo apt remove -y ros-humble-* && sudo apt autoremove
+sudo rm /etc/apt/sources.list.d/ros2.list
+sudo apt update && sudo apt upgrade -y
 ```
+
+踩坑:卡在 "update-initramfs: Generating /boot/initrd.img-..." 时连按多次回车即可继续。
 
 3.5 NCCL
 
 ```bash
+# 下载: https://developer.nvidia.com/nccl/nccl-legacy-downloads
 sudo tar -xvf nccl_2.16.5-1+cuda11.8_x86_64.txz -C /usr/local
-# bashrc: LD_LIBRARY_PATH/CPATH 指向 /usr/local/nccl_2.16.5-1+cuda11.8_x86_64/{lib,include}
+
+# ~/.bashrc 追加
+export CUDA_HOME=/usr/local/cuda-11.8
+export PATH=$CUDA_HOME/bin:$PATH
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=/usr/local/nccl_2.16.5-1+cuda11.8_x86_64/lib:$LD_LIBRARY_PATH
+export CPATH=/usr/local/nccl_2.16.5-1+cuda11.8_x86_64/include:$CPATH
+source ~/.bashrc
 ```
 
 ---

@@ -41,27 +41,30 @@ index-url = https://pypi.tuna.tsinghua.edu.cn/simple
 extra-index-url = https://mirrors.aliyun.com/pypi/simple/
 EOF
 
-# uv 读自己的环境变量(~/.bashrc 追加)
+# uv 读自己的环境变量(~/.bashrc 追加)——uv 不吃 pip.conf
 export UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 export UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
 ```
 
-torch 等需要专用 index-url 的包不走上述镜像,详见 4.1。
+torch 等需要专用 index-url 的包不走上述镜像,详见 4.1(PyTorch 官方源国内通常也能直连,不行再走清华 pypi 里的 torch wheel)。临时换源:uv pip install pkg --index-url <URL>。
 
 1.3 aria2c 多线程下载与断点续传
 
 ```bash
 sudo apt install -y aria2
 
-# 通用模板(-x16 16连接、-s16 分16段、-c 断点续传、-k1M 最小分块)
+# 通用模板(-x16 16连接、-s16 分16段、-c 断点续传、-k1M 最小分块1MB)
 aria2c -x16 -s16 -k1M -c -d /path/to/dir -o filename <URL>
 
-# 例:Miniconda 安装包
+# 例:Miniconda 安装包(断电/掉线后重跑同一命令即续传)
 aria2c -x16 -s16 -c \
   https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/Miniconda3-latest-Linux-x86_64.sh
+
+# 例:大 wheel / 模型文件
+aria2c -x16 -s16 -c -o model.safetensors <URL>
 ```
 
-断点续传原理:aria2c 在目标文件旁生成 .aria2 控制文件,中断后重跑同一条命令即续;改了 URL 或输出路径就续不上。服务器不支持 Range 请求时 -x16 退化单线程,属正常。
+断点续传原理:aria2c 在目标文件旁生成 .aria2 控制文件,中断后重跑同一条命令即续;改了 URL 或输出路径就续不上,控制文件别删。服务器不支持 Range 请求时 -x16 退化单线程,属正常。
 
 1.4 HuggingFace 镜像与 GitHub 加速
 
@@ -258,16 +261,27 @@ ds = load_dataset("HuggingFaceFW/fineweb", split="train", streaming=True)
 ```
 
 ```bash
-# 预下载 + 离线
+# 预下载 + 离线(适合单机多次训练)
 huggingface-cli download bigcode/the-stack-smol --repo-type dataset --local-dir ./data/the-stack-smol
-export HF_DATASETS_OFFLINE=1
+export HF_DATASETS_OFFLINE=1   # 训练时不再联网
 
-# 集群共享缓存
+# 集群共享缓存(缓存指向共享文件系统 NFS/Lustre/JuiceFS)
 export HF_HOME=/shared/nfs/huggingface
-# rank0 先下载,其他 rank barrier 后命中缓存;NFS 文件锁有坑,务必 rank0 预下载完再读
 ```
 
-国产模型优先 ModelScope:modelscope download --model Qwen/Qwen2.5-7B-Instruct。
+多机/多卡避免重复下载——rank0 先下载,其他 rank barrier 后命中缓存:
+
+```python
+from datasets import load_dataset
+import torch.distributed as dist
+if dist.get_rank() == 0:
+    ds = load_dataset("your_dataset")
+dist.barrier()
+ds = load_dataset("your_dataset")
+```
+
+坑:NFS 上文件锁可能有问题,务必 rank0 预下载完再让其他节点读;不要多进程同时写同一缓存目录。
+国产模型(Qwen/DeepSeek 等)优先 ModelScope:modelscope download --model Qwen/Qwen2.5-7B-Instruct,国内 CDN 更快。
 
 5.4 对象存储互传:s5cmd / rclone / ossutil
 
@@ -312,12 +326,19 @@ pixi init myproj && cd myproj && pixi add python=3.10 numpy
 
 ```bash
 sudo tee /etc/docker/daemon.json <<EOF
-{ "registry-mirrors": ["https://docker.m.daocloud.io"] }
+{
+  "registry-mirrors": [
+    "https://docker.m.daocloud.io"
+  ]
+}
 EOF
 sudo systemctl daemon-reload && sudo systemctl restart docker
 ```
 
 - docker.m.daocloud.io:目前可用的公共代理,也可直接前缀拉取 docker pull docker.m.daocloud.io/library/nginx:latest(免改 daemon)
+- 阿里云个人专属加速器(控制台→容器镜像服务→镜像加速器,获取 https://xxxx.mirror.aliyuncs.com):ECS 上效果最佳,外网不一定生效
+- 兜底:GitHub Actions 同步所需镜像到阿里云 ACR / 腾讯云 TCR 个人实例;或给 Docker 配 HTTP 代理直连
+- 镜像站可用性变化频繁,以实际 docker pull 测试为准
 - 阿里云个人专属加速器(控制台→容器镜像服务获取):ECS 上效果最佳,外网不一定生效
 - 兜底:GitHub Actions 同步到 ACR/TCR;或给 Docker 配 HTTP 代理
 - 可用性变化频繁,以实际 docker pull 测试为准
