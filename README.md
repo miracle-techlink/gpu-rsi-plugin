@@ -46,8 +46,11 @@ GPU 新机 bringup 的自我进化系统:一次前置问答,之后 agent 自主�
 │   │   ├── compile/evaluator.sh    ← 编译:1000/秒,产物冒烟(实测通过)
 │   │   └── install/evaluator.sh    ← 包安装:1000/秒,import 验证
 │   ├── references/              ← 变异空间知识库(agent 按需查阅)
-│   │   ├── cloud-gpu-setup.md      ← 云端环境配置全手册(镜像源/aria2c/HF/BBR/ccache)
-│   │   └── pc-ubuntu-setup.md      ← 台式机补充(驱动/CUDA 多版本/ROS2/包冲突)
+│   │   ├── cloud-gpu-setup.md      ← 云端结构化手册(含"为什么"原理)
+│   │   ├── pc-ubuntu-setup.md      ← 台式机结构化手册(驱动/CUDA 多版本/ROS2)
+│   │   ├── originals/              ← 两份手册的原文逐字收录版(完整上下文)
+│   │   ├── scripts/                ← 可执行脚本(setup_apt/install_torch/enable_bbr 等,幂等)
+│   │   └── topics/                 ← nccl-multinode.md(多机) + profiling-toolchain.md(剖析)
 │   └── assets/                  ← selector.sh / reporter.py(通用件)
 ```
 

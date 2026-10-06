@@ -85,6 +85,8 @@ aria2c -x16 -s16 -c https://ghproxy.com/https://github.com/org/repo/releases/dow
 # 备选前缀:https://mirror.ghproxy.com/  https://gh-proxy.com/
 ```
 
+**为什么 Xet 优先于 hf_transfer**:Xet 把文件切成内容寻址的块(类似 git 的 delta),微调迭代重下模型时只传变化的块,省 80%+ 流量,且天然断点续传;hf_transfer 是单文件多线程暴力拉满带宽,冷下载极限快但不续传、与 Xet 互斥。结论:迭代场景常驻 Xet,只有"一次性满带宽冷下超大文件"才临时开 hf_transfer,用完关掉。
+
 ---
 
 2. 安装 Miniconda
@@ -144,6 +146,8 @@ conda create -n train python=3.10 -y && conda activate train
 uv pip install numpy einops
 ```
 
+**为什么 uv 比 pip 快一个量级**:uv 用 Rust 重写,并行下载(pip 串行)、全局缓存去重(同一 wheel 跨 venv 只存一份)、resolver 用 PubGrub 算法(pip 的回溯 resolver 在大依赖树上慢且易卡)。大项目环境搭建从 pip 的十几分钟压到 uv 的几十秒。
+
 3.3 性能调优(~/.bashrc)
 
 ```bash
@@ -180,6 +184,10 @@ python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda
 
 版本组合速查(2026 常用):torch 2.4.x ↔ triton 3.0.x / cu121/124;torch 2.5~2.6 ↔ triton 3.1~3.2 / cu124/126。不指定版本号让官方 index 自动解最稳。
 
+**为什么 triton 不用单独装**:torch 2.x 的 inductor 编译后端依赖 triton,且二者版本强绑定(triton 主版本号跟着 torch 走)。手动另装 triton 极易版本错配,导致 torch.compile 编译失败或算子报错。让官方 index 按 torch 自动解出匹配 triton 是唯一稳妥路径。
+
+**为什么 cuXXX 通道要按 nvidia-smi 的 CUDA Version 选**:nvidia-smi 显示的是驱动支持的**最高** CUDA 运行时版本;wheel 的 cu126 表示"用 CUDA 12.6 编译"。选 ≤ 驱动支持版本的最近通道即可——选高了运行时报 driver version insufficient,选低了浪费新特性。驱动向后兼容,所以 cu124 的 wheel 在支持 12.6 的驱动上也能跑。
+
 4.2 flash-attn 预编译 wheel
 
 不要 pip install flash-attn(那是源码编译)。去 release 页按「torch 版本 × CUDA × python 版本 × abiTRUE/FALSE」四元组选预编译 wheel:
@@ -196,6 +204,8 @@ python -c "import flash_attn; print(flash_attn.__version__)"
 ```
 
 release 页:https://github.com/Dao-AILab/flash-attention/releases;四元组对不上换邻近版本,abiTRUE/FALSE 选错 import 报符号错误。下载慢套 ghproxy 前缀。
+
+**为什么四元组必须精确匹配,尤其 abi**:flash-attn 是 C++/CUDA 扩展,wheel 二进制针对特定 torch ABI(C++ 符号 mangling)、CUDA 运行时、Python ABI 编译。torch 2.2 起默认 `cxx11_abi=TRUE`,但很多环境仍是 FALSE——abi 不匹配时 import 报 `undefined symbol: ...` 符号错误,且不会提示是 abi 问题。用那条四元组查询命令拿到的值去对 wheel 文件名,是唯一不踩坑的方式。
 
 4.3 deepspeed
 
@@ -241,6 +251,8 @@ sysctl net.ipv4.tcp_congestion_control   # 应输出 bbr
 ```
 
 配套:数据集/模型缓存放本地 NVMe(挂载加 noatime),不要让 dataloader 读网络盘。
+
+**为什么 BBR 在云主机上收益大**:默认的 cubic 拥塞控制在丢包时激进降窗,跨境/高延迟线路下吞吐腰斩;BBR 改为按"带宽×RTT"建模,主动探测瓶颈带宽,丢包线路下吞吐可提升数倍,且对所有 TCP 下载(aria2c/HF/对象存储)统一生效,一次配置一劳永逸。调大 TCP 缓冲区是为了让高带宽高延迟(BDP 大)的链路能填满管道——默认 87380 字节的窗口在千兆跨境链路上跑不满。
 
 5.2 Git LFS 按需拉取
 
@@ -339,9 +351,6 @@ sudo systemctl daemon-reload && sudo systemctl restart docker
 - 阿里云个人专属加速器(控制台→容器镜像服务→镜像加速器,获取 https://xxxx.mirror.aliyuncs.com):ECS 上效果最佳,外网不一定生效
 - 兜底:GitHub Actions 同步所需镜像到阿里云 ACR / 腾讯云 TCR 个人实例;或给 Docker 配 HTTP 代理直连
 - 镜像站可用性变化频繁,以实际 docker pull 测试为准
-- 阿里云个人专属加速器(控制台→容器镜像服务获取):ECS 上效果最佳,外网不一定生效
-- 兜底:GitHub Actions 同步到 ACR/TCR;或给 Docker 配 HTTP 代理
-- 可用性变化频繁,以实际 docker pull 测试为准
 
 5.8 编译缓存 ccache / sccache
 
@@ -355,6 +364,8 @@ export CMAKE_CUDA_COMPILER_LAUNCHER=ccache
 export MAX_JOBS=$(nproc)
 # 多机/CI 共享缓存换 sccache(可挂 S3 后端);ccache -s 查命中率
 ```
+
+**为什么 ccache 有效**:ccache 对"预处理器输出 + 编译选项"做哈希,命中就跳过编译直接返回上次产物。开发迭代中 90% 的 TU 没改动,二次全量编译从小时级压到分钟级。前提是编译器/flag/头文件没变——改了 torch 版本或 CUDA 版本缓存全失效,属正常。sccache 是其分布式版,可挂 S3 后端让多机/CI 共享同一份缓存。
 
 ---
 

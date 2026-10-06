@@ -67,10 +67,14 @@ agent 是变异算子 + 选择器,evaluator 是唯一可信的环境。**禁止�
 
 ## 参考文档(变异空间的知识库,按需查阅)
 
-提出变异时不知道有哪些可调的维度,查这两份:
+提出变异时不知道有哪些可调的维度,按场景查:
 
-- `references/cloud-gpu-setup.md` — 云端环境配置全手册:apt/pip/uv 镜像源、aria2c 参数、HF Xet vs hf_transfer、ghproxy 备选前缀、BBR sysctl 参数、Git LFS、s5cmd/rclone、apt-fast、libmamba/pixi、Docker 镜像源现状、ccache/sccache。**下载/安装/编译 domain 的变异空间主要来自这里。**
+- `references/cloud-gpu-setup.md` — 云端环境配置结构化手册(含"为什么"原理):镜像源/aria2c/HF Xet vs hf_transfer/BBR/ccache,关键决策点都附原理。**下载/安装/编译 domain 的变异空间主要来自这里。**
 - `references/pc-ubuntu-setup.md` — PC 台式机补充:驱动/.run 安装、包冲突(libtbb)、NVML vglusers 坑、CUDA 多版本共存、ROS2、Colmap。仅在裸机/台式机场景查。
+- `references/originals/` — 两份手册的**原文逐字收录版**(已脱敏)。结构化摘要信息不够、需要完整上下文/原始命令/大纲时查这里。
+- `references/scripts/` — **可执行脚本**(幂等可重跑):setup_apt_mirrors.sh / install_miniconda.sh / install_uv.sh / install_torch.sh(自动按 CUDA 选 wheel 通道)/ install_flash_attn.sh(自动查四元组)/ enable_bbr.sh / setup_ccache.sh / verify_all.sh(输出 JSON 供 evaluator 用)。基线搭建直接用,不必从手册抄命令。
+- `references/topics/nccl-multinode.md` — 多机分布式:NCCL 环境变量、nccl-tests 验证、IB/RoCE 坑。训练通信瓶颈 domain 查这里。
+- `references/topics/profiling-toolchain.md` — 性能剖析:nvtop/iostat/py-spy 概览 → nsys/ncu 算子级 → dataloader 参数。训练吞吐 domain 的定位方法论和变异空间。
 
 用法:不要全文读入;按当前 domain 和变异方向定位到对应小节,提取具体参数值写进 genome.env。文档里的推荐值只是先验,**最终取舍由 evaluator 实测裁决**——推荐值也可能在你的网络上是错的。
 
